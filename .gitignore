@@ -4,3 +4,5 @@ __pycache__/
 .session.json
 *.hash
 vega/models/*.gguf
+projects/
+bin/qmd-wrapper.sh

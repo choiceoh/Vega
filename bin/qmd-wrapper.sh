@@ -1,1 +1,0 @@
-/home/choiceoh/.vega/qmd/qmd-wrapper.sh
