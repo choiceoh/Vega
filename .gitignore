@@ -1,8 +1,4 @@
 __pycache__/
 *.pyc
-*.db
 .session.json
-*.hash
-vega/models/*.gguf
-projects/
-bin/qmd-wrapper.sh
+projects.db
