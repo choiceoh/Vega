@@ -3,3 +3,4 @@ __pycache__/
 *.db
 .session.json
 *.hash
+vega/models/*.gguf
