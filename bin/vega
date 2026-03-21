@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Vega CLI wrapper — resolves to vega.py in the same installation.
+# Place this script (or a symlink to it) somewhere on $PATH so that
+# spawn("vega", [...]) in Deneb's VegaMemoryManager can find it.
+
+set -euo pipefail
+
+# Resolve the real location of this script (follows symlinks).
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
+# vega.py lives one level up from bin/
+VEGA_DIR="${VEGA_HOME:-$(dirname "$SCRIPT_DIR")}"
+VEGA_CLI="$VEGA_DIR/vega.py"
+
+if [ ! -f "$VEGA_CLI" ]; then
+  echo "error: vega.py not found at $VEGA_CLI" >&2
+  echo "hint: set VEGA_HOME to the directory containing vega.py" >&2
+  exit 1
+fi
+
+# Prefer python3, fall back to python.
+PYTHON="${PYTHON:-}"
+if [ -z "$PYTHON" ]; then
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON=python3
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON=python
+  else
+    echo "error: python3 not found" >&2
+    exit 1
+  fi
+fi
+
+exec "$PYTHON" "$VEGA_CLI" "$@"
