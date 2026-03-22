@@ -45,8 +45,34 @@ python3 vega.py <명령> [인수...]
 | `_bundle` | 다음에 필요할 데이터 (auto_brief, related_projects 등) |
 | `match_reasons` | 검색 매칭 사유 (프로젝트명/본문/의미검색/커뮤니케이션) |
 | `_auto_brief` | 검색 0건 시 퍼지 매칭된 프로젝트 brief |
+| `_performance` | 실행 시간 (`elapsed_ms`) (v1.49) |
+| `_estimated_tokens` | 응답 data의 추정 토큰 수 (v1.49) |
 
 `ask` 내부 자동 라우팅: search, brief, show, urgent, pipeline, person, dashboard, timeline, list 등 18개 명령
+
+### 에러 응답 구조 (v1.49)
+
+에러 응답에 `recovery` 필드가 자동 생성됩니다:
+```json
+{
+  "status": "error",
+  "data": {
+    "error": "프로젝트를 찾을 수 없습니다",
+    "error_type": "user_error",
+    "recovery": [
+      {"action": "list", "hint": "전체 프로젝트 목록 조회"},
+      {"action": "search \"<키워드>\"", "hint": "키워드로 검색"}
+    ]
+  }
+}
+```
+
+알 수 없는 명령에는 `did_you_mean` 필드로 유사 명령을 제안합니다.
+brief 실패 시 `candidates` 필드에 유사 프로젝트 후보를 제공합니다.
+
+### 세션 TTL (v1.49)
+
+세션은 30분 비활성 시 자동 초기화됩니다. "그 프로젝트" 등 대명사가 오래된 세션 컨텍스트를 참조하는 문제를 방지합니다.
 
 ## Upgrade 명령 (v1.45)
 

@@ -67,14 +67,14 @@ def _build_single_brief(pid):
 
     return {
         'project_id': pid,
-        'project_name': proj['name'],
-        'client': proj['client'],
-        'status': proj['status'],
-        'capacity': proj['capacity'],
-        'biz_type': proj['biz_type'],
-        'person_internal': proj['person_internal'],
-        'person_external': proj['person_external'],
-        'partner': proj['partner'],
+        'project_name': proj['name'] or '',
+        'client': proj['client'] or '',
+        'status': proj['status'] or '',
+        'capacity': proj['capacity'] or '',
+        'biz_type': proj['biz_type'] or '',
+        'person_internal': proj['person_internal'] or '',
+        'person_external': proj['person_external'] or '',
+        'partner': proj['partner'] or '',
         'latest_activity': latest_activity,
         'next_actions': next_actions,
         'risks': risks,
@@ -125,9 +125,12 @@ def _exec_brief(params):
         # fuzzy 폴백
         pid, _conf = _fuzzy_find_project(ref)
     if not pid:
+        from core import _build_search_suggestions
+        candidates = _build_search_suggestions(ref, limit=5)
         return {
-            'error': '프로젝트를 특정할 수 없습니다. ID 또는 프로젝트명을 포함해주세요.',
+            'error': '프로젝트를 특정할 수 없습니다.',
             'usage': 'brief 5  또는  brief "비금도"',
+            'candidates': candidates.get('projects', []) if candidates else [],
         }
 
     return _build_single_brief(pid)

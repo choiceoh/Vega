@@ -1,5 +1,38 @@
 # Vega 변경 이력 (Changelog)
 
+## vega v1.49 — 에러 제거 및 AI 에이전트 사용성 개선
+
+### 핵심: Deneb UX 패턴 도입. 에러 복구 가이드, 실행 메타데이터, 응답 일관성 강화.
+
+### 버그 수정
+
+| #   | 수정                                                          | 파일                  |
+| --- | ------------------------------------------------------------- | --------------------- |
+| 1   | 빈 검색어가 `status: "ok"` 반환 → `"error"` + VegaError       | `commands/search.py`  |
+| 2   | 도달 불가 코드: communications-only follow_up_hint 상위 분리  | `commands/search.py`  |
+| 3   | silent exception 7곳에 로깅 추가 (write, search, core)        | `commands/write.py`, `commands/search.py`, `core.py` |
+| 4   | 세션 TTL 미존재 → 30분 비활성 시 초기화 (잘못된 대명사 해석 방지) | `core.py`          |
+
+### AI 에이전트 사용성 개선
+
+| #   | 항목                                                          | 파일                  |
+| --- | ------------------------------------------------------------- | --------------------- |
+| 1   | `_performance.elapsed_ms` — 모든 응답에 실행 시간 포함         | `core.py`             |
+| 2   | `_estimated_tokens` — 응답 크기 추정 (컨텍스트 윈도우 관리용)  | `core.py`             |
+| 3   | `recovery` — 에러 응답에 복구 가이드 자동 생성                 | `core.py`, `config.py`|
+| 4   | `did_you_mean` — 알 수 없는 명령에 퍼지 매칭 제안              | `core.py`             |
+| 5   | `candidates` — brief 실패 시 유사 프로젝트 후보 제공           | `commands/brief.py`   |
+| 6   | `_auto_brief_error` — _auto_brief 생성 실패 시 에러 정보 노출  | `commands/search.py`  |
+| 7   | 응답 필드 None → 빈 문자열 정규화 (brief, search)              | `commands/brief.py`, `commands/search.py` |
+
+### 하위 호환성
+
+- 기존 응답 필드 삭제/변경 없음
+- 빈 쿼리 search가 `ok` → `error`로 변경 (유일한 breaking change, 실질적 버그 수정)
+- SCHEMA_VERSION 변경 없음 (여전히 6)
+
+---
+
 ## vega v1.48 — Deneb(OpenClaw) 호환성 강화
 
 ### 핵심: 상위 프로젝트 Deneb와의 연결성 및 호환성 강화. 버전 협상, 검색 모드 제어, 기능 프로빙 지원.
