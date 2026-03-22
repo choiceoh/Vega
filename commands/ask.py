@@ -23,7 +23,7 @@ def _exec_ask(params):
             row = conn.execute("SELECT name FROM projects WHERE id=?", (recent_ids[0],)).fetchone()
             if row:
                 name = row['name'] or ''
-                for pronoun in ['그 프로젝트', '거기', '그거', '아까 그', '방금 그']:
+                for pronoun in sorted(['그 프로젝트', '거기', '그거', '아까 그', '방금 그'], key=len, reverse=True):
                     query = query.replace(pronoun, name)
         finally:
             conn.close()

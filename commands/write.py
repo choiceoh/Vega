@@ -227,11 +227,12 @@ def _exec_add_action(params):
                                 (pid, heading, body, ctype, entry_date))
                     _row = conn.execute("SELECT last_insert_rowid()").fetchone()
                     new_cid = _row[0] if _row else None
-                    for tag in (tags if new_cid else []):
-                        conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
-                        tag_row = conn.execute("SELECT id FROM tags WHERE name=?", (tag,)).fetchone()
-                        if tag_row:
-                            conn.execute("INSERT OR IGNORE INTO chunk_tags (chunk_id, tag_id) VALUES (?, ?)", (new_cid, tag_row[0]))
+                    if tags and new_cid:
+                        conn.executemany("INSERT OR IGNORE INTO tags (name) VALUES (?)", [(t,) for t in tags])
+                        placeholders = ','.join('?' * len(tags))
+                        tag_rows = conn.execute(f"SELECT id, name FROM tags WHERE name IN ({placeholders})", list(tags)).fetchall()
+                        for tag_id, _ in tag_rows:
+                            conn.execute("INSERT OR IGNORE INTO chunk_tags (chunk_id, tag_id) VALUES (?, ?)", (new_cid, tag_id))
             conn.commit()
             db_synced = True
         finally:

@@ -15,6 +15,12 @@ import config
 from config import get_db_connection
 
 
+def _escape_like(s):
+    if not s:
+        return s
+    return s.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
+
 def _backup_file(md_path):
     """편집 전 .md 파일 백업 (.bak 확장자)"""
     import logging as _logging
@@ -50,8 +56,8 @@ def find_md_path(project_id_or_name, db_path=None, md_dir=None):
             row = conn.execute("SELECT id, name, source_file FROM projects WHERE id = ?",
                               (int(project_id_or_name),)).fetchone()
         else:
-            row = conn.execute("SELECT id, name, source_file FROM projects WHERE name LIKE ?",
-                              (f"%{project_id_or_name}%",)).fetchone()
+            row = conn.execute("SELECT id, name, source_file FROM projects WHERE name LIKE ? ESCAPE '\\'",
+                              (f"%{_escape_like(project_id_or_name)}%",)).fetchone()
     except Exception:
         row = None
     finally:

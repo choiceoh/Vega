@@ -38,7 +38,10 @@ class Contacts(BaseAddon):
         """
         all_contacts = self._extract_all(ctx)
         if cmd == 'project' and args:
-            pid = int(args[0])
+            try:
+                pid = int(args[0])
+            except (ValueError, IndexError):
+                return {'count': 0, 'contacts': {}, 'error': '유효한 프로젝트 ID를 지정하세요.'}
             filtered = {k: v for k, v in all_contacts.items() if pid in v.get('_projects', set())}
             return {'count': len(filtered), 'contacts': self._serialize(filtered)}
         if cmd == 'search' and args:
@@ -52,7 +55,11 @@ class Contacts(BaseAddon):
     def run(self, cmd, args, ctx):
         contacts = self._extract_all(ctx)
         if cmd == 'project' and args:
-            pid = int(args[0])
+            try:
+                pid = int(args[0])
+            except (ValueError, IndexError):
+                ctx.output({'error': '유효한 프로젝트 ID를 지정하세요.'})
+                return
             filtered = {k: v for k, v in contacts.items() if pid in v.get('_projects', set())}
             ctx.output(self._serialize(filtered), lambda d: self._fmt_contacts(d, f"프로젝트 [{pid}]"))
         elif cmd == 'search' and args:

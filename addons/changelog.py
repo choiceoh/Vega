@@ -24,7 +24,7 @@ class Changelog(BaseAddon):
             try:
                 old = json.loads(sp.read_text(encoding='utf-8'))
                 ch = self._diff(old, cur)
-            except (json.JSONDecodeError, KeyError):
+            except (json.JSONDecodeError, UnicodeDecodeError, KeyError):
                 ch = self._initial_changes(cur)
         else:
             ch = self._initial_changes(cur)

@@ -76,9 +76,9 @@ class Template(BaseAddon):
         try:
             importer = Path(__file__).parent.parent / 'project_db_v2.py'
             if importer.exists():
-                import subprocess
+                import subprocess, sys
                 result = subprocess.run(
-                    ['python3', str(importer), 'import', str(ctx.md_dir), '--db', ctx.db_path],
+                    [sys.executable, str(importer), 'import', str(ctx.md_dir), '--db', ctx.db_path],
                     capture_output=True, text=True, timeout=10
                 )
                 if result.returncode == 0:

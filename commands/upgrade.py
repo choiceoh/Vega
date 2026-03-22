@@ -61,8 +61,10 @@ def _exec_upgrade(params):
 
     # init_db가 CREATE TABLE IF NOT EXISTS + 마이그레이션 처리
     conn = project_db_v2.init_db(config.DB_PATH)
-    new_ver = conn.execute("PRAGMA user_version").fetchone()[0]
-    conn.close()
+    try:
+        new_ver = conn.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        conn.close()
 
     result['schema_version'] = new_ver
     result['schema_migrated'] = old_ver < new_ver
