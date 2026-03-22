@@ -52,14 +52,15 @@ def _load_project_index(db_path=None):
                    status, capacity, biz_type, partner
             FROM projects
         """).fetchall()
-        for r in rows:
-            # comm_log에서 발신자 목록 추출
-            senders = conn.execute(
-                "SELECT DISTINCT sender FROM comm_log WHERE project_id = ?",
-                (r['id'],)
-            ).fetchall()
-            sender_names = [s['sender'] for s in senders if s['sender']]
+        # comm_log 발신자를 한번에 로드 (N+1 방지)
+        sender_rows = conn.execute(
+            "SELECT project_id, sender FROM comm_log WHERE sender IS NOT NULL AND sender != '' GROUP BY project_id, sender"
+        ).fetchall()
+        senders_by_project = {}
+        for sr in sender_rows:
+            senders_by_project.setdefault(sr['project_id'], []).append(sr['sender'])
 
+        for r in rows:
             projects.append({
                 'id': r['id'],
                 'name': r['name'] or '',
@@ -68,7 +69,7 @@ def _load_project_index(db_path=None):
                 'person_internal': r['person_internal'] or '',
                 'person_external': r['person_external'] or '',
                 'partner': r['partner'] or '',
-                'senders': sender_names,
+                'senders': senders_by_project.get(r['id'], []),
                 # 매칭용 키워드: 프로젝트명 토큰 + 고객사
                 'keywords': _extract_keywords(r),
             })

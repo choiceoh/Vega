@@ -23,6 +23,13 @@ import config as _cfg
 from config import get_db_connection, RERANK_MODE
 
 
+def _escape_like(s):
+    """SQL LIKE 패턴에서 특수문자(%와 _)를 이스케이프."""
+    if not s:
+        return s
+    return s.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
+
 # ──────────────────────────────────────────────
 # 1. 쿼리 분석기
 # ──────────────────────────────────────────────
@@ -440,16 +447,16 @@ def _sqlite_search_impl(conn, query, extracted):
     if extracted['clients']:
         client_conds = []
         for cl in extracted['clients']:
-            client_conds.append("(p.client LIKE ? OR p.name LIKE ?)")
-            params.extend([f"%{cl}%", f"%{cl}%"])
+            client_conds.append("(p.client LIKE ? ESCAPE '\\' OR p.name LIKE ? ESCAPE '\\')")
+            params.extend([f"%{_escape_like(cl)}%", f"%{_escape_like(cl)}%"])
         conditions.append("(" + " OR ".join(client_conds) + ")")
 
     # 담당자 필터
     if extracted['persons']:
         person_conds = []
         for p in extracted['persons']:
-            person_conds.append("(p.person_internal LIKE ? OR c.content LIKE ?)")
-            params.extend([f"%{p}%", f"%{p}%"])
+            person_conds.append("(p.person_internal LIKE ? ESCAPE '\\' OR c.content LIKE ? ESCAPE '\\')")
+            params.extend([f"%{_escape_like(p)}%", f"%{_escape_like(p)}%"])
         conditions.append("(" + " OR ".join(person_conds) + ")")
 
     # 상태 필터 (동의어 확장: "급한" → "긴급" 등)
@@ -461,8 +468,8 @@ def _sqlite_search_impl(conn, query, extracted):
         for s in extracted['statuses']:
             synonyms = [s] + _STATUS_SYNONYMS.get(s, [])
             for syn in synonyms:
-                status_conds.append("p.status LIKE ?")
-                params.append(f"%{syn}%")
+                status_conds.append("p.status LIKE ? ESCAPE '\\'")
+                params.append(f"%{_escape_like(syn)}%")
         conditions.append("(" + " OR ".join(status_conds) + ")")
 
     # 키워드 전문검색 (FTS5, strict soft-AND 후 broad OR 폴백)
@@ -489,17 +496,17 @@ def _sqlite_search_impl(conn, query, extracted):
         elif fts_terms:
             for term in fts_terms:
                 if term.strip():
-                    local_conditions.append("c.content LIKE ?")
-                    local_params.append(f"%{term}%")
+                    local_conditions.append("c.content LIKE ? ESCAPE '\\'")
+                    local_params.append(f"%{_escape_like(term)}%")
         elif query.strip() and not any([extracted['clients'], extracted['persons'], extracted['statuses']]):
-            local_conditions.append("c.content LIKE ?")
-            local_params.append(f"%{query}%")
+            local_conditions.append("c.content LIKE ? ESCAPE '\\'")
+            local_params.append(f"%{_escape_like(query)}%")
 
         if extracted['tags']:
             tag_conds = []
             for tag in extracted['tags']:
-                tag_conds.append("(c.content LIKE ? OR p.name LIKE ?)")
-                local_params.extend([f"%{tag}%", f"%{tag}%"])
+                tag_conds.append("(c.content LIKE ? ESCAPE '\\' OR p.name LIKE ? ESCAPE '\\')")
+                local_params.extend([f"%{_escape_like(tag)}%", f"%{_escape_like(tag)}%"])
             local_conditions.append("(" + " OR ".join(tag_conds) + ")")
 
         if local_conditions:
@@ -571,8 +578,8 @@ def _sqlite_search_impl(conn, query, extracted):
             # 한국어 전처리된 키워드 + 원본 쿼리
             ko_terms = _preprocess_korean(query)
             all_terms = list(set([query] + ko_terms))
-            like_conds = [f"c.content LIKE ?" for _ in all_terms]
-            like_params = [f"%{t}%" for t in all_terms]
+            like_conds = [f"c.content LIKE ? ESCAPE '\\'" for _ in all_terms]
+            like_params = [f"%{_escape_like(t)}%" for t in all_terms]
             existing_ids = {r['chunk_id'] for r in chunk_results}
             if existing_ids:
                 like_sql += f" WHERE ({' OR '.join(like_conds)}) AND c.id NOT IN ({','.join('?' * len(existing_ids))})"
@@ -614,8 +621,8 @@ def _sqlite_search_impl(conn, query, extracted):
             elif extracted['clients']:
                 cl_conds = []
                 for cl in extracted['clients']:
-                    cl_conds.append("p.name LIKE ?")
-                    comm_params.append(f"%{cl}%")
+                    cl_conds.append("p.name LIKE ? ESCAPE '\\'")
+                    comm_params.append(f"%{_escape_like(cl)}%")
                 comm_sql += " AND (" + " OR ".join(cl_conds) + ")"
 
             comm_sql += f" ORDER BY cl.log_date DESC, bm25(comm_fts, 3.0, 2.0, 2.0, 1.0) LIMIT {_COMM_LIMIT}"
