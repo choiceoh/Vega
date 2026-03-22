@@ -613,11 +613,12 @@ def import_files(directory, db_path=None):
                     """, (pid, heading, body, ctype, entry_date))
                     cid = cur.lastrowid
 
-                    for tag in tags:
-                        cur.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
-                        tag_row = cur.execute("SELECT id FROM tags WHERE name=?", (tag,)).fetchone()
-                        if tag_row:
-                            cur.execute("INSERT OR IGNORE INTO chunk_tags (chunk_id, tag_id) VALUES (?, ?)", (cid, tag_row[0]))
+                    if tags:
+                        cur.executemany("INSERT OR IGNORE INTO tags (name) VALUES (?)", [(t,) for t in tags])
+                        placeholders = ','.join('?' * len(tags))
+                        tag_rows = cur.execute(f"SELECT id, name FROM tags WHERE name IN ({placeholders})", list(tags)).fetchall()
+                        for tag_id, _ in tag_rows:
+                            cur.execute("INSERT OR IGNORE INTO chunk_tags (chunk_id, tag_id) VALUES (?, ?)", (cid, tag_id))
 
                 # 커뮤니케이션 로그 삽입
                 for entry in comm_entries:
@@ -730,11 +731,12 @@ def upsert_md_file(cur, fpath, existing_hashes=None):
             "INSERT INTO chunks (project_id, section_heading, content, chunk_type, entry_date) VALUES (?, ?, ?, ?, ?)",
             (pid, heading, body, ctype, entry_date))
         cid = cur.lastrowid
-        for tag in tags:
-            cur.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag,))
-            tag_row = cur.execute("SELECT id FROM tags WHERE name=?", (tag,)).fetchone()
-            if tag_row:
-                cur.execute("INSERT OR IGNORE INTO chunk_tags (chunk_id, tag_id) VALUES (?, ?)", (cid, tag_row[0]))
+        if tags:
+            cur.executemany("INSERT OR IGNORE INTO tags (name) VALUES (?)", [(t,) for t in tags])
+            placeholders = ','.join('?' * len(tags))
+            tag_rows = cur.execute(f"SELECT id, name FROM tags WHERE name IN ({placeholders})", list(tags)).fetchall()
+            for tag_id, _ in tag_rows:
+                cur.execute("INSERT OR IGNORE INTO chunk_tags (chunk_id, tag_id) VALUES (?, ?)", (cid, tag_id))
 
     # 커뮤니케이션 로그
     for entry in comm_entries:
@@ -742,8 +744,8 @@ def upsert_md_file(cur, fpath, existing_hashes=None):
             "INSERT INTO comm_log (project_id, log_date, sender, subject, summary) VALUES (?, ?, ?, ?, ?)",
             (pid, entry['date'], entry['sender'], entry['subject'], entry['summary']))
 
-    # 해시 갱신
-    cur.execute("DELETE FROM file_hashes WHERE source_file=?", (fname,))
+    # 해시 갱신 — fname과 fpath_str 모두 삭제하여 일관성 유지
+    cur.execute("DELETE FROM file_hashes WHERE source_file IN (?, ?)", (fname, fpath_str))
     cur.execute(
         "INSERT OR REPLACE INTO file_hashes (source_file, content_hash, updated_at) VALUES (?, ?, ?)",
         (fpath_str, content_hash, datetime.now().isoformat()))
@@ -831,6 +833,12 @@ def rebuild_fts(conn):
 # 7. 검색
 # ──────────────────────────────────────────────
 
+def _escape_like(s):
+    """SQL LIKE 패턴에서 특수문자(%와 _)를 이스케이프. ESCAPE '\\' 와 함께 사용."""
+    if not s:
+        return s
+    return s.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
 # FTS5 예약어 (쿼리에 들어가면 크래시)
 _FTS_RESERVED = {'AND', 'OR', 'NOT', 'NEAR'}
 
@@ -856,7 +864,13 @@ def search(query=None, client=None, status=None, person=None, tag=None,
     db_path = db_path or config.DB_PATH
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    try:
+        return _search_inner(conn, query, client, status, person, tag, chunk_type, date_from, date_to)
+    finally:
+        conn.close()
 
+
+def _search_inner(conn, query, client, status, person, tag, chunk_type, date_from, date_to):
     # 섹션 검색
     conditions = []
     params = []
@@ -876,24 +890,24 @@ def search(query=None, client=None, status=None, person=None, tag=None,
             conditions.append("chunks_fts MATCH ?")
             params.append(safe_q)
         else:
-            conditions.append("c.content LIKE ?")
-            params.append(f"%{query}%")
+            conditions.append("c.content LIKE ? ESCAPE '\\'")
+            params.append(f"%{_escape_like(query)}%")
     if client:
-        conditions.append("(p.client LIKE ? OR p.name LIKE ?)")
-        params.extend([f"%{client}%", f"%{client}%"])
+        conditions.append("(p.client LIKE ? ESCAPE '\\' OR p.name LIKE ? ESCAPE '\\')")
+        params.extend([f"%{_escape_like(client)}%", f"%{_escape_like(client)}%"])
     if status:
-        conditions.append("p.status LIKE ?")
-        params.append(f"%{status}%")
+        conditions.append("p.status LIKE ? ESCAPE '\\'")
+        params.append(f"%{_escape_like(status)}%")
     if person:
-        conditions.append("(p.person_internal LIKE ? OR c.content LIKE ?)")
-        params.extend([f"%{person}%", f"%{person}%"])
+        conditions.append("(p.person_internal LIKE ? ESCAPE '\\' OR c.content LIKE ? ESCAPE '\\')")
+        params.extend([f"%{_escape_like(person)}%", f"%{_escape_like(person)}%"])
     if chunk_type:
         conditions.append("c.chunk_type = ?")
         params.append(chunk_type)
     if tag:
         sql += " JOIN chunk_tags ct ON ct.chunk_id = c.id JOIN tags t ON t.id = ct.tag_id"
-        conditions.append("t.name LIKE ?")
-        params.append(f"%{tag}%")
+        conditions.append("t.name LIKE ? ESCAPE '\\'")
+        params.append(f"%{_escape_like(tag)}%")
     if date_from:
         conditions.append("c.entry_date >= ?")
         params.append(date_from)
@@ -918,10 +932,10 @@ def search(query=None, client=None, status=None, person=None, tag=None,
                     c.section_heading, c.content, c.chunk_type, c.entry_date
                 FROM chunks c
                 JOIN projects p ON c.project_id = p.id
-                WHERE c.content LIKE ?
+                WHERE c.content LIKE ? ESCAPE '\\'
                 ORDER BY p.id, c.id
             """
-            chunk_results = conn.execute(fallback_sql, [f"%{query}%"]).fetchall()
+            chunk_results = conn.execute(fallback_sql, [f"%{_escape_like(query)}%"]).fetchall()
         else:
             chunk_results = []
 
@@ -941,17 +955,16 @@ def search(query=None, client=None, status=None, person=None, tag=None,
                 """
                 comm_params = [safe_q]
                 if client:
-                    comm_sql += " AND (p.client LIKE ? OR p.name LIKE ?)"
-                    comm_params.extend([f"%{client}%", f"%{client}%"])
+                    comm_sql += " AND (p.client LIKE ? ESCAPE '\\' OR p.name LIKE ? ESCAPE '\\')"
+                    comm_params.extend([f"%{_escape_like(client)}%", f"%{_escape_like(client)}%"])
                 if person:
-                    comm_sql += " AND cl.sender LIKE ?"
-                    comm_params.append(f"%{person}%")
+                    comm_sql += " AND cl.sender LIKE ? ESCAPE '\\'"
+                    comm_params.append(f"%{_escape_like(person)}%")
                 comm_sql += " ORDER BY cl.log_date DESC LIMIT 20"
                 comm_results = conn.execute(comm_sql, comm_params).fetchall()
             except Exception:
                 pass  # FTS 실패 시 무시
 
-    conn.close()
     return chunk_results, comm_results
 
 
@@ -1031,13 +1044,15 @@ def print_results(chunk_results, comm_results):
 def list_projects(db_path=None):
     db_path = db_path or config.DB_PATH
     conn = sqlite3.connect(db_path)
-    rows = conn.execute("""
-        SELECT p.id, p.name, p.client, p.status, p.person_internal, p.capacity,
-               (SELECT COUNT(*) FROM chunks WHERE project_id=p.id) as chunks,
-               (SELECT COUNT(*) FROM comm_log WHERE project_id=p.id) as comms
-        FROM projects p ORDER BY p.id
-    """).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute("""
+            SELECT p.id, p.name, p.client, p.status, p.person_internal, p.capacity,
+                   (SELECT COUNT(*) FROM chunks WHERE project_id=p.id) as chunks,
+                   (SELECT COUNT(*) FROM comm_log WHERE project_id=p.id) as comms
+            FROM projects p ORDER BY p.id
+        """).fetchall()
+    finally:
+        conn.close()
 
     print(f"\n{'ID':>3} | {'프로젝트':<30} | {'고객/발주처':<15} | {'상태':<20} | {'담당':<15} | 섹션 | 로그")
     print("-" * 120)
@@ -1049,23 +1064,24 @@ def show_project(project_id, db_path=None):
     db_path = db_path or config.DB_PATH
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    try:
+        proj = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not proj:
+            print(f"프로젝트 ID {project_id} 없음.")
+            return
 
-    proj = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
-    if not proj:
-        print(f"프로젝트 ID {project_id} 없음.")
-        return
-
-    chunks = conn.execute("SELECT * FROM chunks WHERE project_id=? ORDER BY id", (project_id,)).fetchall()
-    tags = conn.execute("""
-        SELECT DISTINCT t.name FROM tags t
-        JOIN chunk_tags ct ON ct.tag_id = t.id
-        JOIN chunks c ON c.id = ct.chunk_id
-        WHERE c.project_id = ?
-    """, (project_id,)).fetchall()
-    comms = conn.execute("""
-        SELECT * FROM comm_log WHERE project_id=? ORDER BY log_date DESC LIMIT 10
-    """, (project_id,)).fetchall()
-    conn.close()
+        chunks = conn.execute("SELECT * FROM chunks WHERE project_id=? ORDER BY id", (project_id,)).fetchall()
+        tags = conn.execute("""
+            SELECT DISTINCT t.name FROM tags t
+            JOIN chunk_tags ct ON ct.tag_id = t.id
+            JOIN chunks c ON c.id = ct.chunk_id
+            WHERE c.project_id = ?
+        """, (project_id,)).fetchall()
+        comms = conn.execute("""
+            SELECT * FROM comm_log WHERE project_id=? ORDER BY log_date DESC LIMIT 10
+        """, (project_id,)).fetchall()
+    finally:
+        conn.close()
 
     print(f"\n{'='*70}")
     print(f" {proj['name']}")
@@ -1107,16 +1123,17 @@ def show_timeline(project_id, db_path=None):
     db_path = db_path or config.DB_PATH
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    
-    proj = conn.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone()
-    if not proj:
-        print(f"프로젝트 ID {project_id} 없음.")
-        return
+    try:
+        proj = conn.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not proj:
+            print(f"프로젝트 ID {project_id} 없음.")
+            return
 
-    comms = conn.execute("""
-        SELECT * FROM comm_log WHERE project_id=? ORDER BY log_date DESC
-    """, (project_id,)).fetchall()
-    conn.close()
+        comms = conn.execute("""
+            SELECT * FROM comm_log WHERE project_id=? ORDER BY log_date DESC
+        """, (project_id,)).fetchall()
+    finally:
+        conn.close()
 
     print(f"\n📅 {proj['name']} 타임라인 ({len(comms)}건)")
     print(f"{'='*70}")
@@ -1129,14 +1146,16 @@ def show_timeline(project_id, db_path=None):
 def list_tags(db_path=None):
     db_path = db_path or config.DB_PATH
     conn = sqlite3.connect(db_path)
-    rows = conn.execute("""
-        SELECT t.name, COUNT(DISTINCT c.project_id) as cnt
-        FROM tags t
-        JOIN chunk_tags ct ON ct.tag_id = t.id
-        JOIN chunks c ON c.id = ct.chunk_id
-        GROUP BY t.name ORDER BY t.name
-    """).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute("""
+            SELECT t.name, COUNT(DISTINCT c.project_id) as cnt
+            FROM tags t
+            JOIN chunk_tags ct ON ct.tag_id = t.id
+            JOIN chunks c ON c.id = ct.chunk_id
+            GROUP BY t.name ORDER BY t.name
+        """).fetchall()
+    finally:
+        conn.close()
 
     print(f"\n{'태그':<30} | 프로젝트 수")
     print("-" * 45)

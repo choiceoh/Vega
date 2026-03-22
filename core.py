@@ -895,8 +895,8 @@ def _build_bundle(command, data, pid=None):
                 person = (data.get('person_internal') or '').strip()
                 if person and person.split():
                     related = conn.execute(
-                        "SELECT id, name, status FROM projects WHERE person_internal LIKE ? AND id != ? LIMIT 3",
-                        (f"%{person.split()[0]}%", pid)
+                        "SELECT id, name, status FROM projects WHERE person_internal LIKE ? ESCAPE '\\' AND id != ? LIMIT 3",
+                        (f"%{_escape_like(person.split()[0])}%", pid)
                     ).fetchall()
                     if related:
                         bundle['related_projects'] = [dict(r) for r in related]
@@ -944,9 +944,10 @@ def _build_bundle(command, data, pid=None):
             try:
                 conn = get_db_connection(row_factory=True)
                 try:
+                    parts = client.split()
                     related = conn.execute(
-                        "SELECT id, name, status FROM projects WHERE client LIKE ? AND id != ? LIMIT 3",
-                        (f"%{_escape_like(client.split()[0] if client.split() else '')}%", show_pid)
+                        "SELECT id, name, status FROM projects WHERE client LIKE ? ESCAPE '\\' AND id != ? LIMIT 3",
+                        (f"%{_escape_like(parts[0])}%" if parts else '', show_pid)
                     ).fetchall()
                     if related:
                         bundle['same_client_projects'] = [dict(r) for r in related]

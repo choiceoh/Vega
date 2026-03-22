@@ -221,7 +221,7 @@ def _call_embed(model, text):
             if isinstance(result[0], (int, float)):
                 return result       # [0.1, 0.2, ...] → 그대로
         # 빈 리스트 또는 이상한 타입
-        raise RuntimeError(f"embed() 비정상 반환: 길이={len(result) if isinstance(result, list) else type(result)}")
+        raise RuntimeError(f"embed() 비정상 반환: 길이={len(result) if isinstance(result, list) else type(result).__name__}")
 
     # 2) create_embedding() 폴백 (구 API)
     if hasattr(model, 'create_embedding'):
@@ -369,8 +369,8 @@ class LocalReranker:
         }
         """
         try:
-            choices = output.get('choices', [])
-            if not choices:
+            choices = output.get('choices') or []
+            if not choices or not isinstance(choices[0], dict):
                 return 0.0
 
             logprobs_data = choices[0].get('logprobs')
