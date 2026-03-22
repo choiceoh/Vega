@@ -423,7 +423,8 @@ class TestEdgeCases(VegaTestCase):
 
     def test_search_empty_query(self):
         r = self._exec('search', {'query': ''})
-        self.assertEqual(r['status'], 'ok')
+        self.assertEqual(r['status'], 'error')
+        self.assertIn('검색어', r['data']['error'])
 
     def test_show_nonexistent(self):
         r = self._exec('show', {'sub_args': ['99999']})
@@ -2790,6 +2791,73 @@ class TestMemorySearchMode(VegaTestCase):
         """mode 미지정 → query 모드 (기본)"""
         data = self._assert_ok(self._exec('memory-search', {'query': 'budget'}))
         self.assertIsInstance(data, list)
+
+
+class TestV149Usability(VegaTestCase):
+    """v1.49 — 에러 제거 및 AI 에이전트 사용성 개선 테스트"""
+
+    def test_performance_metadata(self):
+        """모든 응답에 _performance.elapsed_ms 포함"""
+        r = self._exec('search', {'query': '비금도'})
+        self.assertIn('_performance', r)
+        self.assertIn('elapsed_ms', r['_performance'])
+        self.assertIsInstance(r['_performance']['elapsed_ms'], (int, float))
+
+    def test_estimated_tokens(self):
+        """정상 응답에 _estimated_tokens 포함"""
+        r = self._exec('search', {'query': '비금도'})
+        if r['status'] == 'ok' and r.get('data'):
+            self.assertIn('_estimated_tokens', r)
+            self.assertIsInstance(r['_estimated_tokens'], int)
+
+    def test_error_recovery_field(self):
+        """에러 응답에 recovery 필드 포함"""
+        r = self._exec('brief', {'sub_args': ['존재하지않는프로젝트명XYZ']})
+        if r['status'] == 'error':
+            self.assertIn('recovery', r['data'])
+
+    def test_unknown_command_did_you_mean(self):
+        """알 수 없는 명령에 did_you_mean 제안"""
+        r = self._exec('serach', {})
+        self.assertEqual(r['status'], 'error')
+        self.assertIn('did_you_mean', r['data'])
+        self.assertIn('search', r['data']['did_you_mean'])
+
+    def test_brief_candidates_on_failure(self):
+        """brief 실패 시 candidates 후보 제공"""
+        r = self._exec('brief', {'sub_args': ['존재하지않는프로젝트명XYZ']})
+        if r['status'] == 'error':
+            self.assertIn('candidates', r['data'])
+            self.assertIsInstance(r['data']['candidates'], list)
+
+    def test_session_ttl(self):
+        """세션 TTL — 30분 이상 비활성 세션은 초기화"""
+        from core import _load_session, _save_session, _SESSION_FILE, SELF_DIR
+        # 오래된 세션 생성
+        old_session = {
+            'recent': [{'id': 999, 'name': 'test'}],
+            'last_command': 'brief',
+            'last_at': (datetime.now() - timedelta(minutes=60)).isoformat(),
+        }
+        _save_session(old_session)
+        loaded = _load_session()
+        self.assertEqual(loaded['recent'], [], "30분 이상 비활성 세션은 초기화되어야 함")
+
+    def test_brief_none_to_empty_string(self):
+        """brief 응답의 필드가 None이 아닌 빈 문자열"""
+        r = self._exec('brief', {'sub_args': ['1']})
+        if r['status'] == 'ok':
+            data = r['data']
+            for field in ('project_name', 'client', 'status', 'person_internal', 'person_external'):
+                if field in data:
+                    self.assertIsNotNone(data[field], f"{field}이 None이면 안 됨")
+
+    def test_search_empty_returns_error(self):
+        """빈 검색어는 status=error 반환"""
+        r = self._exec('search', {'query': ''})
+        self.assertEqual(r['status'], 'error')
+        self.assertIn('검색어', r['data']['error'])
+        self.assertIn('recovery', r['data'])
 
 
 if __name__ == '__main__':

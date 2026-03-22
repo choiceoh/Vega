@@ -1,6 +1,6 @@
 import config
 from collections import OrderedDict
-from core import register_command, _get_flag, _build_search_suggestions, _SEARCH_HINT_STOPWORDS
+from core import register_command, _get_flag, _build_search_suggestions, _SEARCH_HINT_STOPWORDS, VegaError
 
 
 def _search_summary(data):
@@ -27,11 +27,11 @@ def _exec_search(params):
         query = ' '.join(sub_args)
 
     if not query or not query.strip():
-        return {
-            'query': '', 'projects': [], 'communications': [],
-            'result_count': {'projects': 0, 'communications': 0},
-            'summary': '검색어를 입력하세요. 예: search "비금도 케이블"'
-        }
+        raise VegaError(
+            '검색어를 입력하세요.',
+            usage=['search "비금도 케이블"', 'search "납기"'],
+            error_type='missing_input',
+        )
 
     router = SearchRouter(db_path=config.DB_PATH)
     results = router.search(query)
@@ -54,8 +54,8 @@ def _exec_search(params):
             continue
         if pid not in grouped:
             grouped[pid] = {
-                'id': pid, 'name': r['project_name'], 'client': r['client'],
-                'status': r['status'], 'person': r['person'],
+                'id': pid, 'name': r['project_name'] or '', 'client': r['client'] or '',
+                'status': r['status'] or '', 'person': r['person'] or '',
                 'sections': [], 'sources': set(), 'score': r.get('score', 0),
             }
         grouped[pid]['sources'].add(r['source'])
@@ -165,8 +165,10 @@ def _exec_search(params):
                 from commands.brief import _build_single_brief
                 out['_auto_brief'] = _build_single_brief(fz_pid)
                 out['_auto_brief']['_match_confidence'] = fz_conf
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug("_auto_brief 생성 실패 (pid=%s): %s", fz_pid, e)
+                out['_auto_brief_error'] = str(e)
         out['suggestions'] = _build_search_suggestions(query)
         # 0건일 때 대안 명령 안내 (시간/금액 등 검색으로 풀 수 없는 쿼리)
         import re as _re
@@ -186,12 +188,12 @@ def _exec_search(params):
         persons_in_query = extracted_all.get('persons', [])
         if persons_in_query:
             out['follow_up_hint'] = f"person {persons_in_query[0]} (포트폴리오 조회) / show {top['id']} / brief {top['id']}"
-        elif out.get('communications') and not out['projects']:
-            out['follow_up_hint'] = '커뮤니케이션만 매칭됨. show <프로젝트ID>로 프로젝트 상세 확인 가능'
         elif len(out['projects']) > 5:
             out['follow_up_hint'] = f"결과 {len(out['projects'])}건. --min-score로 필터 가능. show {top['id']} / brief {top['id']}"
         else:
             out['follow_up_hint'] = f"show {top['id']} / brief {top['id']} / timeline {top['id']}"
+    elif out.get('communications'):
+        out['follow_up_hint'] = '커뮤니케이션만 매칭됨. show <프로젝트ID>로 프로젝트 상세 확인 가능'
 
     # match_methods 전달
     if results.get('sqlite') and results['sqlite'].get('match_methods'):

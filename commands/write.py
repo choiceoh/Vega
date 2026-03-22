@@ -143,8 +143,9 @@ def _exec_update(params):
             conn.commit()
         finally:
             conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("audit_log 기록 실패 (update): %s", e)
 
     # 이력에 변경 기록
     add_history_entry(md_path, f"{field_name} 변경: {old_value} → {new_value}")
@@ -237,7 +238,9 @@ def _exec_add_action(params):
             db_synced = True
         finally:
             conn.close()
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("add-action DB 동기화 실패: %s", e)
         db_synced = False
 
     # audit_log 기록
@@ -248,8 +251,9 @@ def _exec_add_action(params):
             conn_audit.commit()
         finally:
             conn_audit.close()
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("audit_log 기록 실패 (add-action): %s", e)
 
     return {
         'project_id': pid,

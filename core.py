@@ -6,7 +6,7 @@ Vega 프로젝트 검색엔진 — 핵심 인프라
 개별 명령 핸들러는 commands/ 디렉토리에 위치.
 """
 
-import sys, json, re, os
+import sys, json, re, os, time
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -278,8 +278,26 @@ def require_project(params, usage_hint=None, fuzzy=False):
     return pid
 
 
+def _build_error_recovery(command, error_msg):
+    """에러 메시지 기반 복구 안내 자동 생성"""
+    recovery = []
+    if '찾을 수 없습니다' in error_msg or '특정할 수 없습니다' in error_msg:
+        recovery.append({'action': 'list', 'hint': '전체 프로젝트 목록 조회'})
+        recovery.append({'action': 'search "<키워드>"', 'hint': '키워드로 검색'})
+    if 'DB' in error_msg or 'db' in error_msg.lower():
+        recovery.append({'action': 'health', 'hint': '시스템 상태 확인'})
+        recovery.append({'action': 'upgrade', 'hint': 'DB 스키마 마이그레이션 + 재빌드'})
+    if '명령' in error_msg or 'Unknown' in error_msg:
+        recovery.append({'action': 'ask "<질문>"', 'hint': '자연어로 질문하면 자동 라우팅'})
+    if '검색어' in error_msg or 'query' in error_msg.lower():
+        recovery.append({'action': 'search "<키워드>"', 'hint': '키워드 검색'})
+        recovery.append({'action': 'urgent', 'hint': '긴급 항목 확인'})
+    return recovery or None
+
+
 def execute(command, params):
     """명령 실행 → 표준화된 JSON 응답 반환"""
+    t0 = time.monotonic()
 
     response = {
         'command': command,
@@ -291,9 +309,18 @@ def execute(command, params):
 
     entry = _COMMAND_REGISTRY.get(command)
     if not entry:
+        import difflib
+        available = sorted(_COMMAND_REGISTRY.keys())
+        similar = difflib.get_close_matches(command, available, n=3, cutoff=0.5)
         response['status'] = 'error'
-        response['data'] = {'error': f'알 수 없는 명령: {command}',
-                           'available': sorted(_COMMAND_REGISTRY.keys())}
+        err_data = {'error': f'알 수 없는 명령: {command}', 'available': available}
+        if similar:
+            err_data['did_you_mean'] = similar
+            err_data['recovery'] = [{'action': s, 'hint': f'"{s}" 명령 실행'} for s in similar]
+        else:
+            err_data['recovery'] = [{'action': 'ask "<질문>"', 'hint': '자연어로 질문하면 자동 라우팅'}]
+        response['data'] = err_data
+        response['_performance'] = {'elapsed_ms': round((time.monotonic() - t0) * 1000)}
         return response
 
     if isinstance(entry, dict):
@@ -338,6 +365,7 @@ def execute(command, params):
         response['data'] = {'error': e.message, 'error_type': e.error_type}
         if e.usage:
             response['data']['usage'] = e.usage
+        response['data']['recovery'] = e.recovery or _build_error_recovery(command, e.message)
         response['summary'] = f'오류: {e.message}'
 
     except Exception as e:
@@ -345,6 +373,7 @@ def execute(command, params):
         response['status'] = 'error'
         response['data'] = {'error': str(e), 'type': type(e).__name__,
                            'debug': traceback.format_exc()}
+        response['data']['recovery'] = _build_error_recovery(command, str(e))
         response['summary'] = f'오류: {e}'
 
     # 오류 자동 교정 (E-7) — ask 이외 명령에서도 작동
@@ -358,6 +387,14 @@ def execute(command, params):
                 'corrected_to': corrected['command'],
             }
             return corrected
+
+    # 성능 메타데이터 + 응답 크기 추정
+    response['_performance'] = {'elapsed_ms': round((time.monotonic() - t0) * 1000)}
+    if response.get('data'):
+        try:
+            response['_estimated_tokens'] = len(json.dumps(response['data'], ensure_ascii=False, default=_json_ser)) // 4
+        except Exception:
+            pass
 
     return response
 
@@ -612,11 +649,22 @@ def _build_search_suggestions(query, limit=8):
 
 _SESSION_FILE = SELF_DIR / '.session.json'
 _MAX_SESSION_ITEMS = 10
+_SESSION_TTL_SECONDS = 1800  # 30분 비활성 시 세션 초기화
 
 def _load_session():
     try:
         if _SESSION_FILE.exists():
-            return json.loads(_SESSION_FILE.read_text(encoding='utf-8'))
+            session = json.loads(_SESSION_FILE.read_text(encoding='utf-8'))
+            # TTL 체크: 30분 이상 비활성이면 세션 초기화
+            last_at = session.get('last_at')
+            if last_at:
+                try:
+                    elapsed = (datetime.now() - datetime.fromisoformat(last_at)).total_seconds()
+                    if elapsed > _SESSION_TTL_SECONDS:
+                        return {'recent': [], 'last_command': None, 'last_at': None}
+                except (ValueError, TypeError):
+                    pass
+            return session
     except Exception:
         pass
     return {'recent': [], 'last_command': None, 'last_at': None}
@@ -902,8 +950,9 @@ def _build_bundle(command, data, pid=None):
                         bundle['related_projects'] = [dict(r) for r in related]
             finally:
                 conn.close()
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug("_build_bundle 실패 (brief): %s", e)
 
     if command == 'person':
         # 이번 주 활동
@@ -920,8 +969,9 @@ def _build_bundle(command, data, pid=None):
                 if first_pid is not None:
                     from commands.brief import _build_single_brief
                     bundle['auto_brief'] = _build_single_brief(first_pid)
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug("_build_bundle 실패 (search auto_brief): %s", e)
 
     if command == 'urgent':
         # top critical 항목의 brief 번들
@@ -933,8 +983,9 @@ def _build_bundle(command, data, pid=None):
                 try:
                     from commands.brief import _build_single_brief
                     bundle['top_brief'] = _build_single_brief(top_pid)
-                except Exception:
-                    pass
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).debug("_build_bundle 실패 (urgent top_brief): %s", e)
 
     if command == 'show':
         # 같은 발주처의 관련 프로젝트
@@ -953,8 +1004,9 @@ def _build_bundle(command, data, pid=None):
                         bundle['same_client_projects'] = [dict(r) for r in related]
                 finally:
                     conn.close()
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug("_build_bundle 실패 (show same_client): %s", e)
 
     return bundle
 
