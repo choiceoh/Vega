@@ -14,19 +14,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Vega 소스 복사
 if [ -d "$SCRIPT_DIR" ]; then
-  # Python 소스 + commands/ + addons/ 복사
+  # Python 소스 + 패키지 디렉토리 복사
   cp "$SCRIPT_DIR"/*.py "$INSTALL_DIR/vega/" 2>/dev/null || true
-  cp -r "$SCRIPT_DIR/commands" "$INSTALL_DIR/vega/" 2>/dev/null || true
-  cp -r "$SCRIPT_DIR/addons" "$INSTALL_DIR/vega/" 2>/dev/null || true
-  cp "$SCRIPT_DIR/router.py" "$INSTALL_DIR/vega/" 2>/dev/null || true
+  for subdir in commands addons db ml search mail editor; do
+    if [ -d "$SCRIPT_DIR/$subdir" ]; then
+      cp -r "$SCRIPT_DIR/$subdir" "$INSTALL_DIR/vega/" 2>/dev/null || true
+    fi
+  done
   echo "✅ Vega 소스 복사됨"
-fi
-
-# CLI 래퍼 설치 (vega 명령어를 PATH에서 찾을 수 있도록)
-if [ -f "$SCRIPT_DIR/bin/vega" ]; then
-  cp "$SCRIPT_DIR/bin/vega" "$INSTALL_DIR/bin/vega"
-  chmod +x "$INSTALL_DIR/bin/vega"
-  echo "✅ vega CLI 래퍼 설치됨 ($INSTALL_DIR/bin/vega)"
 fi
 
 # 기존 DB 복사 (있으면)
@@ -49,9 +44,8 @@ echo "  Vega:     $INSTALL_DIR/vega/"
 echo "  Models:   $INSTALL_DIR/models/"
 echo "  Projects: $INSTALL_DIR/projects/"
 echo ""
-echo "사용법 (.bashrc 또는 .profile에 추가):"
+echo "사용법 (.bashrc에 추가):"
 echo "  export VEGA_HOME=$INSTALL_DIR"
-echo "  export PATH=\"\$VEGA_HOME/bin:\$PATH\""
 echo "  export DB_PATH=\$VEGA_HOME/vega/projects.db"
 echo "  export MD_DIR=\$VEGA_HOME/projects"
 echo "  export VEGA_MODELS_DIR=\$VEGA_HOME/models"
